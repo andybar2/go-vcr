@@ -30,7 +30,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dnaeon/go-vcr/recorder"
+	"github.com/andybar2/go-vcr/recorder"
 )
 
 func TestHTTPS(t *testing.T) {
