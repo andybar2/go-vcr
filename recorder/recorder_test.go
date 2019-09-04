@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -191,7 +192,7 @@ func TestFilter(t *testing.T) {
 
 	// Add a filter which replaces each request body in the stored cassette:
 	recorder.AddFilter(func(i *cassette.Interaction) error {
-		i.Request.Body = dummyBody
+		i.Request.Body = fmt.Sprintf("%s %v", dummyBody, rand.Int())
 		return nil
 	})
 
@@ -216,8 +217,8 @@ func TestFilter(t *testing.T) {
 	// Assert that each body has been set to our dummy value
 	for i := range tests {
 		body := c.Interactions[i].Request.Body
-		if body != dummyBody {
-			t.Fatalf("got:\t%s\n\twant:\t%s", string(body), string(dummyBody))
+		if !strings.HasPrefix(body, dummyBody) {
+			t.Fatalf("got:\t%s\n\twant something with prefix:\t%s", string(body), string(dummyBody))
 		}
 	}
 
@@ -229,6 +230,18 @@ func httpRecorderTestSetup(t *testing.T, runID string, cassPath string, mode rec
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	recorder.SetMatcher(func(r *http.Request, i cassette.Request) bool {
+		if r.Body == nil {
+			return cassette.DefaultMatcher(r, i)
+		}
+		var b bytes.Buffer
+		if _, err := b.ReadFrom(r.Body); err != nil {
+			return false
+		}
+		r.Body = ioutil.NopCloser(&b)
+		return cassette.DefaultMatcher(r, i) && (b.String() == "" || b.String() == i.Body)
+	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "%s %s", r.Method, runID)

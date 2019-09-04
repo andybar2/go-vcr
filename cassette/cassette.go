@@ -25,6 +25,7 @@
 package cassette
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -84,8 +85,6 @@ type Response struct {
 
 	// Response duration (something like "100ms" or "10s")
 	Duration string `yaml:"duration"`
-
-	replayed bool
 }
 
 // Interaction type contains a pair of request/response for a
@@ -163,17 +162,30 @@ func Load(name string) (*Cassette, error) {
 // AddInteraction appends a new interaction to the cassette
 func (c *Cassette) AddInteraction(i *Interaction) {
 	c.Mu.Lock()
-	c.Interactions = append(c.Interactions, i)
-	c.Mu.Unlock()
+	defer c.Mu.Unlock()
+
+	httpReq := i.Request.toHTTPRequest()
+	found := false
+
+	for _, it := range c.Interactions {
+		if c.Matcher(httpReq, it.Request) {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		c.Interactions = append(c.Interactions, i)
+	}
 }
 
 // GetInteraction retrieves a recorded request/response interaction
 func (c *Cassette) GetInteraction(r *http.Request) (*Interaction, error) {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
+
 	for _, i := range c.Interactions {
-		if !i.replayed && c.Matcher(r, i.Request) {
-			i.replayed = true
+		if c.Matcher(r, i.Request) {
 			return i, nil
 		}
 	}
@@ -185,6 +197,7 @@ func (c *Cassette) GetInteraction(r *http.Request) (*Interaction, error) {
 func (c *Cassette) Save() error {
 	c.Mu.RLock()
 	defer c.Mu.RUnlock()
+
 	// Save cassette file only if there were any interactions made
 	if len(c.Interactions) == 0 {
 		return nil
@@ -224,4 +237,16 @@ func (c *Cassette) Save() error {
 	}
 
 	return nil
+}
+
+func (r Request) toHTTPRequest() *http.Request {
+	req, err := http.NewRequest(r.Method, r.URL, bytes.NewBufferString(r.Body))
+	if err != nil {
+		return nil
+	}
+
+	req.Header = r.Headers
+	req.Form = r.Form
+
+	return req
 }
